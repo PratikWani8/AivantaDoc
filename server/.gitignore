@@ -1,0 +1,10 @@
+node_modules/
+.env
+.env.*
+!.env.example
+storage/uploads/*
+storage/tmp/*
+!storage/uploads/.gitkeep
+!storage/tmp/.gitkeep
+*.log
+coverage/
