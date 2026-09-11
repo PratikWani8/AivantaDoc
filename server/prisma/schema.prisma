@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum DocumentType {
+  INVOICE
+  PURCHASE_ORDER
+  RECEIPT
+  DELIVERY_NOTE
+  UNKNOWN
+}
+
+enum ProcessingStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RelationshipType {
+  PO_TO_INVOICE
+  PO_TO_DELIVERY
+  DELIVERY_TO_INVOICE
+  INVOICE_TO_RECEIPT
+  DUPLICATE
+  RELATED
+}
+
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  passwordHash   String
+  name           String?
+  role           UserRole        @default(USER)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  invoices       Invoice[]
+  purchaseOrders PurchaseOrder[]
+  transactions   Transaction[]
+  auditLogs      AuditLog[]
+}
+
+model Vendor {
+  id             String          @id @default(uuid())
+  name           String
+  taxId          String?
+  email          String?
+  phone          String?
+  address        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  invoices       Invoice[]
+  purchaseOrders PurchaseOrder[]
+  transactions   Transaction[]
+
+  @@index([name])
+  @@index([taxId])
+}
+
+model PurchaseOrder {
+  id         String              @id @default(uuid())
+  poNumber   String              @unique
+  vendorId   String?
+  userId     String?
+  orderDate  DateTime?
+  currency   String              @default("INR")
+  subtotal   Decimal             @db.Decimal(18, 2)
+  tax        Decimal             @db.Decimal(18, 2)
+  total      Decimal             @db.Decimal(18, 2)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  vendor     Vendor?             @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  user       User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items      PurchaseOrderItem[]
+  invoices   Invoice[]
+  deliveries DeliveryNote[]
+
+  @@index([vendorId])
+  @@index([orderDate])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  description     String
+  quantity        Decimal       @db.Decimal(18, 4)
+  unitPrice       Decimal       @db.Decimal(18, 4)
+  tax             Decimal       @db.Decimal(18, 2)
+  total           Decimal       @db.Decimal(18, 2)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+}
+
+model Invoice {
+  id                 String             @id @default(uuid())
+  invoiceNumber      String
+  invoiceDate        DateTime?
+  dueDate            DateTime?
+  vendorId           String?
+  userId             String?
+  purchaseOrderId    String?
+  currency           String             @default("INR")
+  subtotal           Decimal            @db.Decimal(18, 2)
+  tax                Decimal            @db.Decimal(18, 2)
+  discount           Decimal            @db.Decimal(18, 2)
+  total              Decimal            @db.Decimal(18, 2)
+  verificationStatus VerificationStatus @default(PENDING)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  vendor             Vendor?            @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  user               User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  purchaseOrder      PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  items              InvoiceItem[]
+  transactions       Transaction[]
+  receipts           Receipt[]
+
+  @@index([invoiceNumber])
+  @@index([vendorId])
+  @@index([purchaseOrderId])
+  @@index([invoiceDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 4)
+  tax         Decimal @db.Decimal(18, 2)
+  total       Decimal @db.Decimal(18, 2)
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model Receipt {
+  id            String    @id @default(uuid())
+  receiptNumber String    @unique
+  invoiceId     String?
+  receiptDate   DateTime?
+  amount        Decimal   @db.Decimal(18, 2)
+  currency      String    @default("INR")
+  createdAt     DateTime  @default(now())
+  invoice       Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}
+
+model DeliveryNote {
+  id              String         @id @default(uuid())
+  deliveryNumber  String         @unique
+  purchaseOrderId String?
+  deliveryDate    DateTime?
+  vendorId        String?
+  createdAt       DateTime       @default(now())
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseOrderId])
+  @@index([vendorId])
+}
+
+model Transaction {
+  id                    String             @id @default(uuid())
+  userId                String?
+  invoiceId             String?
+  vendorId              String?
+  documentConfidence    Float?
+  poMatchScore          Float?
+  vendorTrustScore      Float?
+  priceConsistencyScore Float?
+  duplicateProbability  Float?
+  transactionTrustScore Float?
+  riskLevel             RiskLevel          @default(LOW)
+  riskExplanation       String?
+  potentialLeakage      Decimal            @default(0) @db.Decimal(18, 2)
+  verificationStatus    VerificationStatus @default(PENDING)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  user                  User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  invoice               Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  vendor                Vendor?            @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  risks                 RiskEvent[]
+  anomalies             Anomaly[]
+  erpRecords            ErpRecord[]
+
+  @@index([riskLevel])
+  @@index([invoiceId])
+  @@index([vendorId])
+  @@index([createdAt])
+}
+
+model ErpRecord {
+  id                 String             @id @default(uuid())
+  transactionId      String
+  vendorId           String?
+  invoiceNumber      String?
+  invoiceDate        DateTime?
+  purchaseOrderId    String?
+  subtotal           Decimal            @db.Decimal(18, 2)
+  tax                Decimal            @db.Decimal(18, 2)
+  total              Decimal            @db.Decimal(18, 2)
+  currency           String             @default("INR")
+  itemsJson          Json
+  verificationStatus VerificationStatus @default(PENDING)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  transaction        Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+}
+
+model RiskEvent {
+  id             String      @id @default(uuid())
+  transactionId  String
+  type           String
+  severity       RiskLevel
+  confidence     Float?
+  amount         Decimal?    @db.Decimal(18, 2)
+  explanation    String
+  recommendation String?
+  resolvedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([severity])
+  @@index([resolvedAt])
+}
+
+model Anomaly {
+  id            String      @id @default(uuid())
+  transactionId String
+  type          String
+  score         Float?
+  severity      RiskLevel
+  explanation   String
+  createdAt     DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([severity])
+}
+
+model DocumentRelationship {
+  id          String           @id @default(uuid())
+  sourceId    String
+  targetId    String
+  type        RelationshipType
+  confidence  Float?
+  explanation String?
+  createdAt   DateTime         @default(now())
+
+  @@index([sourceId])
+  @@index([targetId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+}
